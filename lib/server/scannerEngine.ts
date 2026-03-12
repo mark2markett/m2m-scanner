@@ -4,7 +4,7 @@ import { SupportResistanceAnalyzer } from '@/lib/utils/supportResistance';
 import { TradeSetupAnalyzer } from '@/lib/utils/tradeSetupAnalysis';
 import { PolygonService } from './polygonService';
 import { NewsService } from './newsService';
-import { OpenAIService } from './openaiService';
+import { ClaudeService } from './claudeService';
 import { assessQuality } from '@/lib/utils/qualityAssessment';
 import type { SP500Stock, ScannerStockResult } from '@/lib/types';
 
@@ -67,7 +67,7 @@ async function analyzeStock(stock: SP500Stock): Promise<ScannerStockResult> {
   let aiSummary = '';
 
   try {
-    const insight = await OpenAIService.generateScannerInsight({
+    const insight = await ClaudeService.generateScannerInsight({
       symbol: stock.symbol,
       price: stockData.price,
       change: stockData.changePercent,

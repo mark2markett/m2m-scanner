@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
     "@upstash/redis": "^1.36.3",
     "@vercel/functions": "^3.4.3",
     "lucide-react": "^0.344.0",

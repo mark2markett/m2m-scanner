@@ -8,7 +8,7 @@ Extracted from [m2m-single-stock](https://github.com/mark2markett/m2m-single-sto
 
 - **Next.js 14** — App Router with API routes
 - **Polygon.io** — Real-time stock data and historical OHLCV
-- **OpenAI GPT-4o** — AI narrative for scanned setups
+- **Anthropic Claude Haiku** — AI narrative for scanned setups
 - **Upstash Redis** — Batch state persistence across serverless invocations
 - **Tailwind CSS** — Dark theme UI (#0a0e17 bg, #00E59B accent)
 

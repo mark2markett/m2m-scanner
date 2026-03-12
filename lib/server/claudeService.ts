@@ -1,8 +1,7 @@
 import 'server-only';
+import Anthropic from '@anthropic-ai/sdk';
 
-export class OpenAIService {
-  private static readonly API_URL = 'https://api.openai.com/v1/chat/completions';
-
+export class ClaudeService {
   /**
    * Scanner AI — narrative-only insight for a scanned stock.
    * Quality, confidence, earlyStage, and catalystPresent are computed
@@ -41,11 +40,13 @@ export class OpenAIService {
     risk: string;
     summary: string;
   }> {
-    const apiKey = process.env.OPENAI_API_KEY;
+    const apiKey = process.env.ANTHROPIC_API_KEY;
 
-    if (!apiKey || apiKey === 'your_openai_api_key_here') {
-      throw new Error('OpenAI API key not configured.');
+    if (!apiKey || apiKey === 'your_anthropic_api_key_here') {
+      throw new Error('Anthropic API key not configured.');
     }
+
+    const client = new Anthropic({ apiKey });
 
     const supportStr = data.support.slice(0, 3).map(s => '$' + s.toFixed(2)).join(', ') || 'none';
     const resistStr = data.resistance.slice(0, 3).map(r => '$' + r.toFixed(2)).join(', ') || 'none';
@@ -64,41 +65,22 @@ Return JSON with exactly these 3 fields:
   "summary": "2-3 sentence educational assessment of what the indicators show (max 250 chars)"
 }`;
 
-    const response = await fetch(this.API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are a quantitative setup scanner for the M2M Stock Intelligence platform. Your task: identify the single most important signal and primary risk for a stock setup. Use observational educational language — never advisory language. Return ONLY valid JSON with keySignal, risk, and summary fields.'
-          },
-          {
-            role: 'user',
-            content: userPrompt
-          }
-        ],
-        max_tokens: 300,
-        temperature: 0.2,
-        response_format: { type: 'json_object' }
-      })
+    const response = await client.messages.create({
+      model: 'claude-haiku-3-5-20251001',
+      max_tokens: 300,
+      temperature: 0.2,
+      system: 'You are a quantitative setup scanner for the M2M Stock Intelligence platform. Your task: identify the single most important signal and primary risk for a stock setup. Use observational educational language — never advisory language. Return ONLY valid JSON with keySignal, risk, and summary fields.',
+      messages: [
+        { role: 'user', content: userPrompt }
+      ],
     });
 
-    if (!response.ok) {
-      throw new Error(`OpenAI API error: ${response.status}`);
+    const textBlock = response.content.find(block => block.type === 'text');
+    if (!textBlock || textBlock.type !== 'text') {
+      throw new Error('Invalid response from Anthropic API');
     }
 
-    const responseData = await response.json();
-
-    if (!responseData.choices || !responseData.choices[0] || !responseData.choices[0].message) {
-      throw new Error('Invalid response from OpenAI API');
-    }
-
-    const parsed = JSON.parse(responseData.choices[0].message.content);
+    const parsed = JSON.parse(textBlock.text);
 
     return {
       keySignal: String(parsed.keySignal || '').slice(0, 80),
