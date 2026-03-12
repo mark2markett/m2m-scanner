@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --m2m-bg: #0a0e17;
+  --m2m-card: #111827;
+  --m2m-card-border: #1f2937;
+  --m2m-accent: #00E59B;
+  --m2m-accent-hover: #00cc8a;
+  --m2m-text: #E5E7EB;
+  --m2m-text-secondary: #9CA3AF;
+  --m2m-text-muted: #6B7280;
+}
+
+html, body {
+  overscroll-behavior-y: none;
+  background-color: var(--m2m-bg);
+  color: var(--m2m-text);
+}
+
+button, a, [role="button"] {
+  -webkit-tap-highlight-color: transparent;
+}
