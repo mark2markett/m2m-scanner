@@ -21,12 +21,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
-  const adminPassword = process.env.ADMIN_PASSWORD;
-  if (!adminPassword) {
+  const rawAdminPassword = process.env.ADMIN_PASSWORD;
+  console.log(`[manual-trigger] ADMIN_PASSWORD env var defined: ${rawAdminPassword !== undefined}, length: ${rawAdminPassword?.length ?? 0}`);
+
+  if (!rawAdminPassword) {
     return NextResponse.json({ error: 'Admin password not configured' }, { status: 500 });
   }
 
-  if (!body.password || body.password !== adminPassword) {
+  const adminPassword = rawAdminPassword.trim();
+  const submittedPassword = (body.password || '').trim();
+
+  console.log(`[manual-trigger] Password comparison — submitted length: ${submittedPassword.length}, expected length: ${adminPassword.length}, match: ${submittedPassword === adminPassword}`);
+
+  if (!submittedPassword || submittedPassword !== adminPassword) {
     return NextResponse.json({ error: 'Invalid password' }, { status: 401 });
   }
 
