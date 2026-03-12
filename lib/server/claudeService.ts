@@ -35,6 +35,9 @@ export class ClaudeService {
     totalFactors: number;
     publishable: boolean;
     sentiment: string;
+    rs10?: number;
+    rs20?: number;
+    rs50?: number;
   }): Promise<{
     keySignal: string;
     risk: string;
@@ -54,7 +57,7 @@ export class ClaudeService {
     const userPrompt = `Summarize the setup for ${data.symbol} at $${data.price.toFixed(2)} (${data.change >= 0 ? '+' : ''}${data.change.toFixed(2)}%):
 
 INDICATORS: RSI ${data.rsi.toFixed(1)} | MACD ${data.macd.toFixed(3)} vs Sig ${data.signal.toFixed(3)} (Hist: ${data.histogram.toFixed(3)}) | EMA20 $${data.ema20.toFixed(2)} EMA50 $${data.ema50.toFixed(2)} | ADX ${data.adx.toFixed(1)} | ATR $${data.atr.toFixed(2)} | BB ${data.bbLower.toFixed(2)}-${data.bbUpper.toFixed(2)} | Stoch K${data.stochK.toFixed(1)} D${data.stochD.toFixed(1)} | CMF ${data.cmf.toFixed(3)}
-STRUCTURE: Support ${supportStr} | Resistance ${resistStr} | Stage: ${data.setupStage} | Vol Regime: ${data.volatilityRegime}
+STRUCTURE: Support ${supportStr} | Resistance ${resistStr} | Stage: ${data.setupStage} | Vol Regime: ${data.volatilityRegime}${data.rs10 != null ? `\nRELATIVE STRENGTH vs SPY: 10d ${data.rs10.toFixed(2)} | 20d ${data.rs20!.toFixed(2)} | 50d ${data.rs50!.toFixed(2)}` : ''}
 SCORECARD: ${data.score}/${data.maxScore} (${data.factorsPassed}/${data.totalFactors} factors) | Publishable: ${data.publishable ? 'yes' : 'no'}
 SENTIMENT: ${data.sentiment}
 
@@ -80,7 +83,11 @@ Return JSON with exactly these 3 fields:
       throw new Error('Invalid response from Anthropic API');
     }
 
-    const parsed = JSON.parse(textBlock.text);
+    let rawText = textBlock.text.trim();
+    if (rawText.startsWith('```')) {
+      rawText = rawText.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+    }
+    const parsed = JSON.parse(rawText);
 
     return {
       keySignal: String(parsed.keySignal || '').slice(0, 80),

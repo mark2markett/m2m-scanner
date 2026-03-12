@@ -137,6 +137,14 @@ function DesktopTable({ stocks, onSelectStock }: ScannerTableProps) {
                             </span>
                           )}
                         </div>
+                        {stock.relativeStrength && (
+                          <div className="flex items-center gap-4 mt-1">
+                            <span className="text-[#6B7280]">RS vs SPY:</span>
+                            <RSBadge label="10d" value={stock.relativeStrength.rs10} />
+                            <RSBadge label="20d" value={stock.relativeStrength.rs20} />
+                            <RSBadge label="50d" value={stock.relativeStrength.rs50} />
+                          </div>
+                        )}
                         <div className="text-[#9CA3AF] mt-1">{stock.aiSummary}</div>
                       </div>
                     </td>
@@ -301,6 +309,15 @@ function MacdBadge({ signal }: { signal: string }) {
   return (
     <span className={`text-[10px] font-medium ${bullish ? 'text-[#22c55e]' : 'text-[#ef4444]'}`}>
       {bullish ? '▲' : '▼'}
+    </span>
+  );
+}
+
+function RSBadge({ label, value }: { label: string; value: number }) {
+  const color = value >= 1.02 ? 'text-[#22c55e]' : value <= 0.98 ? 'text-[#ef4444]' : 'text-[#E5E7EB]';
+  return (
+    <span className={`text-xs font-mono ${color}`}>
+      {label}: {value.toFixed(2)}
     </span>
   );
 }

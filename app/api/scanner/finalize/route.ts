@@ -10,7 +10,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { scanDate, totalBatches } = await request.json();
+  const { scanDate, totalBatches, watchlist } = await request.json();
 
   if (!scanDate || typeof totalBatches !== 'number') {
     return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
@@ -48,6 +48,7 @@ export async function POST(request: NextRequest) {
     totalStocks: allStocks.length,
     successCount: successStocks.length,
     errorCount: errorStocks.length,
+    watchlist: watchlist || 'sp500',
     stocks: allStocks,
     topByScore,
     justTriggered,

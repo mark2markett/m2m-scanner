@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { waitUntil } from '@vercel/functions';
-import { SP500_CONSTITUENTS } from '@/lib/data/sp500';
+import { loadWatchlist } from '@/lib/data/watchlistLoader';
 import { ScannerEngine } from '@/lib/server/scannerEngine';
 import { KVStore } from '@/lib/server/kvStore';
 
@@ -14,14 +14,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { scanDate, batchIndex, totalBatches } = await request.json();
+  const { scanDate, batchIndex, totalBatches, watchlist } = await request.json();
 
   if (!scanDate || typeof batchIndex !== 'number' || typeof totalBatches !== 'number') {
     return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
   }
 
+  const watchlistStocks = loadWatchlist(watchlist || 'sp500');
   const start = batchIndex * BATCH_SIZE;
-  const batchStocks = SP500_CONSTITUENTS.slice(start, start + BATCH_SIZE);
+  const batchStocks = watchlistStocks.slice(start, start + BATCH_SIZE);
 
   if (batchStocks.length === 0) {
     return NextResponse.json({ error: 'Empty batch' }, { status: 400 });
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest) {
   if (status) {
     status.completedBatches = batchIndex + 1;
     status.currentBatch = batchIndex + 1;
-    status.stocksProcessed = Math.min((batchIndex + 1) * BATCH_SIZE, SP500_CONSTITUENTS.length);
+    status.stocksProcessed = Math.min((batchIndex + 1) * BATCH_SIZE, watchlistStocks.length);
     status.lastUpdatedAt = new Date().toISOString();
     await KVStore.setScanStatus(status);
   }
@@ -53,7 +54,7 @@ export async function POST(request: NextRequest) {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${process.env.CRON_SECRET}`,
         },
-        body: JSON.stringify({ scanDate, batchIndex: nextBatch, totalBatches }),
+        body: JSON.stringify({ scanDate, batchIndex: nextBatch, totalBatches, watchlist }),
       })
     );
   } else {
@@ -65,7 +66,7 @@ export async function POST(request: NextRequest) {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${process.env.CRON_SECRET}`,
         },
-        body: JSON.stringify({ scanDate, totalBatches }),
+        body: JSON.stringify({ scanDate, totalBatches, watchlist }),
       })
     );
   }

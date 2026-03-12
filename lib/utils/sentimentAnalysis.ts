@@ -4,10 +4,9 @@ export function analyzeSentimentFromTitle(title: string): 'Positive' | 'Negative
   const positiveWords = ['beats', 'exceeds', 'strong', 'growth', 'up', 'gains', 'bullish', 'upgrade', 'buy', 'outperforms', 'record', 'high'];
   const negativeWords = ['misses', 'falls', 'down', 'drops', 'weak', 'decline', 'bearish', 'downgrade', 'sell', 'loss', 'low', 'concern'];
 
-  const lowerTitle = title.toLowerCase();
-
-  const positiveCount = positiveWords.filter(word => lowerTitle.includes(word)).length;
-  const negativeCount = negativeWords.filter(word => lowerTitle.includes(word)).length;
+  const wordBoundary = (word: string) => new RegExp(`\\b${word}\\b`, 'i');
+  const positiveCount = positiveWords.filter(word => wordBoundary(word).test(title)).length;
+  const negativeCount = negativeWords.filter(word => wordBoundary(word).test(title)).length;
 
   if (positiveCount > negativeCount) return 'Positive';
   if (negativeCount > positiveCount) return 'Negative';

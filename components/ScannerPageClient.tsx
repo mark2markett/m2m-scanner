@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { RefreshCw, Clock, Play, X, CheckCircle, AlertCircle } from 'lucide-react';
+import { RefreshCw, Clock, Play, X, CheckCircle, AlertCircle, ChevronDown } from 'lucide-react';
 import { ScannerSummary } from '@/components/ScannerSummary';
 import { ScannerFilters, type ScannerFilterState } from '@/components/ScannerFilters';
 import { ScannerTable } from '@/components/ScannerTable';
@@ -14,6 +14,10 @@ export function ScannerPageClient() {
   const [status, setStatus] = useState<ScanBatchStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Watchlist selection
+  const [watchlists, setWatchlists] = useState<{ id: string; name: string; stockCount: number }[]>([]);
+  const [selectedWatchlist, setSelectedWatchlist] = useState('sp500');
 
   const [filters, setFilters] = useState<ScannerFilterState>({
     search: '',
@@ -42,6 +46,14 @@ export function ScannerPageClient() {
     toastTimer.current = setTimeout(() => setToast(null), 5000);
   }, []);
 
+  // Fetch available watchlists on mount
+  useEffect(() => {
+    fetch('/api/watchlists')
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setWatchlists(data))
+      .catch(() => {});
+  }, []);
+
   const handleManualScan = useCallback(async () => {
     if (!password.trim()) return;
     setScanError(null);
@@ -52,7 +64,7 @@ export function ScannerPageClient() {
       const res = await fetch('/api/scanner/manual-trigger', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: password.trim() }),
+        body: JSON.stringify({ password: password.trim(), watchlist: selectedWatchlist }),
       });
       const data = await res.json();
 
@@ -63,14 +75,15 @@ export function ScannerPageClient() {
       }
 
       // Start polling status
-      setStatus({ scanDate: new Date().toISOString().split('T')[0], totalBatches: 0, completedBatches: 0, currentBatch: 0, status: 'running', stocksProcessed: 0, totalStocks: 503, startedAt: new Date().toISOString(), lastUpdatedAt: new Date().toISOString() });
+      const totalStocks = data.totalStocks || watchlists.find(w => w.id === selectedWatchlist)?.stockCount || 503;
+      setStatus({ scanDate: new Date().toISOString().split('T')[0], totalBatches: 0, completedBatches: 0, currentBatch: 0, status: 'running', stocksProcessed: 0, totalStocks, startedAt: new Date().toISOString(), lastUpdatedAt: new Date().toISOString() });
     } catch {
       setScanning(false);
       showToast('error', 'Failed to connect to server');
     } finally {
       setPassword('');
     }
-  }, [password, showToast]);
+  }, [password, selectedWatchlist, watchlists, showToast]);
 
   // Watch for scan completion when manually triggered
   useEffect(() => {
@@ -225,7 +238,26 @@ export function ScannerPageClient() {
             <div className="flex items-center gap-2">
               <span className="text-[#00E59B] font-bold text-xl tracking-tight">M2M</span>
               <div className="h-5 w-px bg-[#1f2937]" />
-              <span className="text-sm font-semibold text-[#E5E7EB]">S&P 500 Scanner</span>
+              {watchlists.length > 1 ? (
+                <div className="relative">
+                  <select
+                    value={selectedWatchlist}
+                    onChange={e => setSelectedWatchlist(e.target.value)}
+                    className="appearance-none bg-transparent text-sm font-semibold text-[#E5E7EB] pr-6 cursor-pointer focus:outline-none"
+                  >
+                    {watchlists.map(w => (
+                      <option key={w.id} value={w.id} className="bg-[#111827] text-[#E5E7EB]">
+                        {w.name} ({w.stockCount})
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-0 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[#6B7280] pointer-events-none" />
+                </div>
+              ) : (
+                <span className="text-sm font-semibold text-[#E5E7EB]">
+                  {watchlists.find(w => w.id === selectedWatchlist)?.name || 'S&P 500 Scanner'}
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-3">
               {result && (
@@ -287,7 +319,7 @@ export function ScannerPageClient() {
             <RefreshCw className="h-8 w-8 text-[#00E59B] animate-spin mx-auto mb-4" />
             <h2 className="text-lg font-semibold text-[#E5E7EB] mb-2">Scan In Progress</h2>
             <p className="text-[#6B7280] mb-4">
-              Analyzing {status.totalStocks} S&P 500 stocks...
+              Analyzing {status.totalStocks} stocks...
             </p>
             <div className="max-w-md mx-auto">
               <div className="flex justify-between text-xs text-[#6B7280] mb-1">

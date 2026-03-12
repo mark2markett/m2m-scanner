@@ -6,11 +6,12 @@ import { PolygonService } from './polygonService';
 import { NewsService } from './newsService';
 import { ClaudeService } from './claudeService';
 import { assessQuality } from '@/lib/utils/qualityAssessment';
+import { calculateRelativeStrength } from '@/lib/utils/relativeStrength';
 import type { SP500Stock, ScannerStockResult } from '@/lib/types';
 
 const CONCURRENCY = 10;
 
-async function analyzeStock(stock: SP500Stock): Promise<ScannerStockResult> {
+async function analyzeStock(stock: SP500Stock, spyCloses?: number[]): Promise<ScannerStockResult> {
   const historicalLimit = 120;
   const newsLimit = 3;
 
@@ -42,6 +43,9 @@ async function analyzeStock(stock: SP500Stock): Promise<ScannerStockResult> {
     resistance,
     volumes
   );
+
+  // Relative strength vs SPY
+  const relativeStrength = spyCloses ? calculateRelativeStrength(closes, spyCloses) : undefined;
 
   const macdSignal: 'bullish' | 'bearish' = indicators.macd.macd > indicators.macd.signal ? 'bullish' : 'bearish';
   const ema20above50 = indicators.ema20 > indicators.ema50;
@@ -94,6 +98,9 @@ async function analyzeStock(stock: SP500Stock): Promise<ScannerStockResult> {
       totalFactors: scorecard.totalFactors,
       publishable: scorecard.publishable,
       sentiment,
+      rs10: relativeStrength?.rs10,
+      rs20: relativeStrength?.rs20,
+      rs50: relativeStrength?.rs50,
     });
 
     aiKeySignal = insight.keySignal;
@@ -136,6 +143,7 @@ async function analyzeStock(stock: SP500Stock): Promise<ScannerStockResult> {
     aiRisk,
     aiCatalystPresent,
     aiSummary,
+    relativeStrength,
     partial: false,
     analyzedAt: new Date().toISOString(),
   };
@@ -192,11 +200,20 @@ async function runWithConcurrency<T>(
 
 export class ScannerEngine {
   static async analyzeBatch(stocks: SP500Stock[]): Promise<ScannerStockResult[]> {
+    // Fetch SPY historical data once for relative strength calculations
+    let spyCloses: number[] | undefined;
+    try {
+      const spyHistorical = await PolygonService.getHistoricalData('SPY', 'day', 120);
+      spyCloses = spyHistorical.map((d: any) => d.close);
+    } catch (err) {
+      console.warn('[Scanner] Could not fetch SPY data for relative strength:', err instanceof Error ? err.message : 'unknown');
+    }
+
     const results: ScannerStockResult[] = [];
 
     await runWithConcurrency(stocks, async (stock) => {
       try {
-        const result = await analyzeStock(stock);
+        const result = await analyzeStock(stock, spyCloses);
         results.push(result);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Analysis failed';

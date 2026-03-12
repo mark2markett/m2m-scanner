@@ -124,6 +124,11 @@ export interface ScannerStockResult {
   aiRisk: string;
   aiCatalystPresent: boolean;
   aiSummary: string;
+  relativeStrength?: {
+    rs10: number;
+    rs20: number;
+    rs50: number;
+  };
   partial: boolean;
   error?: string;
   analyzedAt: string;
@@ -136,6 +141,7 @@ export interface ScannerResult {
   totalStocks: number;
   successCount: number;
   errorCount: number;
+  watchlist?: string;
   stocks: ScannerStockResult[];
   topByScore: string[];
   justTriggered: string[];

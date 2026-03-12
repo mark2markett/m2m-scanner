@@ -1,17 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { KVStore } from '@/lib/server/kvStore';
+import { loadWatchlist } from '@/lib/data/watchlistLoader';
 import type { ScannerStockResult, ScannerResult } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
-// The 5 slices that cron triggers
-const SLICES: [number, number][] = [
-  [0, 120],
-  [120, 240],
-  [240, 360],
-  [360, 480],
-  [480, 503],
-];
+const SLICE_SIZE = 120;
+
+function computeSlices(totalStocks: number): [number, number][] {
+  const slices: [number, number][] = [];
+  for (let start = 0; start < totalStocks; start += SLICE_SIZE) {
+    slices.push([start, Math.min(start + SLICE_SIZE, totalStocks)]);
+  }
+  return slices;
+}
 
 function isAuthorized(request: NextRequest): boolean {
   const cronSecret = request.headers.get('authorization');
@@ -30,12 +32,15 @@ export async function GET(request: NextRequest) {
 
   const now = new Date();
   const scanDate = now.toISOString().split('T')[0];
+  const watchlistId = request.nextUrl.searchParams.get('watchlist') || 'sp500';
+  const watchlistStocks = loadWatchlist(watchlistId);
+  const slices = computeSlices(watchlistStocks.length);
 
   // Collect all slice results
   const allStocks: ScannerStockResult[] = [];
   const missingSlices: string[] = [];
 
-  for (const [start, end] of SLICES) {
+  for (const [start, end] of slices) {
     const sliceResults = await KVStore.getSliceResults(scanDate, start, end);
     if (sliceResults) {
       allStocks.push(...sliceResults);
@@ -74,6 +79,7 @@ export async function GET(request: NextRequest) {
     totalStocks: allStocks.length,
     successCount: successStocks.length,
     errorCount: errorStocks.length,
+    watchlist: watchlistId,
     stocks: allStocks,
     topByScore,
     justTriggered,

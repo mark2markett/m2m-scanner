@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { SP500_CONSTITUENTS } from '@/lib/data/sp500';
+import { loadWatchlist } from '@/lib/data/watchlistLoader';
 import { ScannerEngine } from '@/lib/server/scannerEngine';
 import { KVStore } from '@/lib/server/kvStore';
 import type { ScanBatchStatus } from '@/lib/types';
@@ -23,11 +23,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const totalAll = SP500_CONSTITUENTS.length;
+  const watchlistId = request.nextUrl.searchParams.get('watchlist') || 'sp500';
+  const watchlistStocks = loadWatchlist(watchlistId);
+  const totalAll = watchlistStocks.length;
   const startIndex = parseInt(request.nextUrl.searchParams.get('start') || '0', 10);
   const endIndex = parseInt(request.nextUrl.searchParams.get('end') || String(totalAll), 10);
 
-  const sliceStocks = SP500_CONSTITUENTS.slice(startIndex, endIndex);
+  const sliceStocks = watchlistStocks.slice(startIndex, endIndex);
   const sliceSize = sliceStocks.length;
 
   if (sliceSize === 0) {

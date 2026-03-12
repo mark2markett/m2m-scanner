@@ -27,7 +27,7 @@ export class SupportResistanceAnalyzer {
           price: current,
           index: i,
           type: 'resistance',
-          strength: this.calculatePivotStrength(highs, lows, i, lookback)
+          strength: this.calculatePivotStrength(highs, lows, i, lookback, 'resistance')
         });
       }
     }
@@ -49,7 +49,7 @@ export class SupportResistanceAnalyzer {
           price: current,
           index: i,
           type: 'support',
-          strength: this.calculatePivotStrength(highs, lows, i, lookback)
+          strength: this.calculatePivotStrength(highs, lows, i, lookback, 'support')
         });
       }
     }
@@ -57,9 +57,9 @@ export class SupportResistanceAnalyzer {
     return pivots.sort((a, b) => b.strength - a.strength);
   }
 
-  private static calculatePivotStrength(highs: number[], lows: number[], index: number, lookback: number): number {
+  private static calculatePivotStrength(highs: number[], lows: number[], index: number, lookback: number, type: 'support' | 'resistance'): number {
     let strength = 1;
-    const pivotPrice = highs[index] || lows[index];
+    const pivotPrice = type === 'resistance' ? highs[index] : lows[index];
     const tolerance = pivotPrice * 0.015;
 
     const recentBars = Math.min(30, highs.length);

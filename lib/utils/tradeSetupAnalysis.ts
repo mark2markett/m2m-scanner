@@ -33,7 +33,7 @@ export class TradeSetupAnalyzer {
 
     const macdMagnitude = Math.abs(macd.macd);
     const histogramRatio = macdMagnitude > 0 ? Math.abs(macd.histogram) / macdMagnitude : 0;
-    const recentMacdCross = histogramRatio < 0.15;
+    const recentMacdCross = histogramRatio < 0.35;
 
     // Late Setup: extreme RSI indicates exhaustion — classify first to avoid false triggers
     if (rsi > 80 || rsi < 20) {
@@ -45,9 +45,22 @@ export class TradeSetupAnalyzer {
       return 'Just Triggered';
     }
 
-    // Mid Setup: all signals aligned + MA stacked + not near resistance + volume
+    // Bullish Mid Setup: all signals aligned + MA stacked + not near resistance + volume
     if (rsiBullish && emaBullish && macdBullish && !nearResistance && maAligned) {
       if (currentPrice > bollingerBands.upper || rsi > 75) {
+        return 'Late Setup';
+      }
+      if (hasVolumeConfirmation) {
+        return 'Mid Setup';
+      }
+    }
+
+    // Bearish Mid Setup: all signals aligned bearish + MA stacked bearish + not near support + volume
+    const rsiBearish = rsi < 50 && rsi > 20;
+    const emaBearish = ema20 < ema50;
+    const macdBearish = macd.macd < macd.signal;
+    if (rsiBearish && emaBearish && macdBearish && !nearSupport && maAligned) {
+      if (currentPrice < bollingerBands.lower || rsi < 25) {
         return 'Late Setup';
       }
       if (hasVolumeConfirmation) {
@@ -151,10 +164,12 @@ export class TradeSetupAnalyzer {
       score += 18;
       reasons.push(`All 3 signals aligned ${allBullish ? 'bullish' : 'bearish'}`);
     } else {
-      let aligned = 0;
-      if (emaBullish) aligned++;
-      if (macdBullish) aligned++;
-      if (rsiBullish) aligned++;
+      let bullishCount = 0;
+      let bearishCount = 0;
+      if (emaBullish) bullishCount++; else bearishCount++;
+      if (macdBullish) bullishCount++; else bearishCount++;
+      if (rsiBullish) bullishCount++; else bearishCount++;
+      const aligned = Math.max(bullishCount, bearishCount);
       score += aligned * 5;
       reasons.push(`${aligned}/3 signals aligned`);
     }
@@ -284,9 +299,10 @@ export class TradeSetupAnalyzer {
     }
 
     // 3. Flow-price alignment (up to 7pts)
-    const priceAboveEma = currentPrice > indicators.ema20;
+    // Use EMA20 vs EMA50 trend direction to avoid penalizing healthy pullbacks
+    const trendBullish = indicators.ema20 > indicators.ema50;
     const cmfPositive = cmf > 0;
-    const aligned = (priceAboveEma && cmfPositive) || (!priceAboveEma && !cmfPositive);
+    const aligned = (trendBullish && cmfPositive) || (!trendBullish && !cmfPositive);
 
     if (aligned) {
       score += 7;
@@ -313,8 +329,19 @@ export class TradeSetupAnalyzer {
     const nearestSupport = validSupport.length > 0 ? validSupport[0] : currentPrice * 0.95;
     const nearestResistance = validResistance.length > 0 ? validResistance[0] : currentPrice * 1.05;
 
-    const risk = Math.abs(currentPrice - nearestSupport);
-    const reward = Math.abs(nearestResistance - currentPrice);
+    // Detect setup direction to compute R/R correctly for both long and short setups
+    const isBearish = indicators.ema20 < indicators.ema50 && indicators.macd.macd < indicators.macd.signal;
+
+    let risk: number, reward: number;
+    if (isBearish) {
+      // Short: risk = distance to resistance (stop), reward = distance to support (target)
+      risk = Math.abs(nearestResistance - currentPrice);
+      reward = Math.abs(currentPrice - nearestSupport);
+    } else {
+      // Long: risk = distance to support (stop), reward = distance to resistance (target)
+      risk = Math.abs(currentPrice - nearestSupport);
+      reward = Math.abs(nearestResistance - currentPrice);
+    }
     const rrRatio = risk > 0 ? reward / risk : 0;
 
     if (rrRatio >= 3) { score += 20; reasons.push(`Excellent R/R ratio: ${rrRatio.toFixed(1)}:1`); }
