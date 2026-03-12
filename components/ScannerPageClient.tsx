@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import { RefreshCw, Clock } from 'lucide-react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { RefreshCw, Clock, Play, X, CheckCircle, AlertCircle } from 'lucide-react';
 import { ScannerSummary } from '@/components/ScannerSummary';
 import { ScannerFilters, type ScannerFilterState } from '@/components/ScannerFilters';
 import { ScannerTable } from '@/components/ScannerTable';
@@ -27,6 +27,64 @@ export function ScannerPageClient() {
     earlyStageOnly: false,
     minConfidence: 0,
   });
+
+  // Manual scan state
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [password, setPassword] = useState('');
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  const showToast = useCallback((type: 'success' | 'error', message: string) => {
+    setToast({ type, message });
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 5000);
+  }, []);
+
+  const handleManualScan = useCallback(async () => {
+    if (!password.trim()) return;
+    setScanError(null);
+    setScanning(true);
+    setShowPasswordModal(false);
+
+    try {
+      const res = await fetch('/api/scanner/manual-trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: password.trim() }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setScanning(false);
+        showToast('error', data.error || 'Failed to start scan');
+        return;
+      }
+
+      // Start polling status
+      setStatus({ scanDate: new Date().toISOString().split('T')[0], totalBatches: 0, completedBatches: 0, currentBatch: 0, status: 'running', stocksProcessed: 0, totalStocks: 503, startedAt: new Date().toISOString(), lastUpdatedAt: new Date().toISOString() });
+    } catch {
+      setScanning(false);
+      showToast('error', 'Failed to connect to server');
+    } finally {
+      setPassword('');
+    }
+  }, [password, showToast]);
+
+  // Watch for scan completion when manually triggered
+  useEffect(() => {
+    if (!scanning) return;
+    if (status && status.status === 'completed') {
+      setScanning(false);
+      showToast('success', 'Scan complete!');
+      fetchResults();
+    }
+    if (status && status.status === 'failed') {
+      setScanning(false);
+      showToast('error', 'Scan failed');
+    }
+  }, [status, scanning, showToast]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch results
   const fetchResults = useCallback(async () => {
@@ -177,6 +235,23 @@ export function ScannerPageClient() {
                 </div>
               )}
               <button
+                onClick={() => setShowPasswordModal(true)}
+                disabled={scanning || (status?.status === 'running')}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-[#00E59B]/10 text-[#00E59B] hover:bg-[#00E59B]/20 border border-[#00E59B]/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {scanning || status?.status === 'running' ? (
+                  <>
+                    <RefreshCw className="h-3 w-3 animate-spin" />
+                    <span>Scanning...</span>
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-3 w-3" />
+                    <span>Run Scan</span>
+                  </>
+                )}
+              </button>
+              <button
                 onClick={fetchResults}
                 disabled={loading}
                 className="p-2 text-[#6B7280] hover:text-[#00E59B] transition-colors disabled:opacity-50"
@@ -187,6 +262,15 @@ export function ScannerPageClient() {
           </div>
         </div>
       </header>
+
+      {/* Last scanned banner */}
+      {result && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-3">
+          <p className="text-xs text-[#6B7280]">
+            Last scanned: {formatTimeAgo(result.completedAt)}
+          </p>
+        </div>
+      )}
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         {/* Loading state */}
@@ -266,6 +350,52 @@ export function ScannerPageClient() {
           </>
         )}
       </main>
+
+      {/* Password Modal */}
+      {showPasswordModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="bg-[#111827] border border-[#1f2937] rounded-xl p-6 w-full max-w-sm mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-[#E5E7EB]">Run Manual Scan</h3>
+              <button onClick={() => { setShowPasswordModal(false); setPassword(''); setScanError(null); }} className="text-[#6B7280] hover:text-[#E5E7EB]">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <input
+              type="password"
+              placeholder="Admin password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleManualScan()}
+              autoFocus
+              className="w-full px-3 py-2 bg-[#0a0e17] border border-[#1f2937] rounded-lg text-sm text-[#E5E7EB] placeholder-[#6B7280] focus:outline-none focus:border-[#00E59B]/50 mb-3"
+            />
+            {scanError && <p className="text-xs text-[#ef4444] mb-3">{scanError}</p>}
+            <button
+              onClick={handleManualScan}
+              disabled={!password.trim()}
+              className="w-full py-2 text-sm font-medium rounded-lg bg-[#00E59B] text-[#0a0e17] hover:bg-[#00E59B]/90 transition-colors disabled:opacity-50"
+            >
+              Start Scan
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Notification */}
+      {toast && (
+        <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-lg text-sm font-medium shadow-lg transition-all ${
+          toast.type === 'success'
+            ? 'bg-[#065f46] text-[#6ee7b7] border border-[#10b981]/30'
+            : 'bg-[#7f1d1d] text-[#fca5a5] border border-[#ef4444]/30'
+        }`}>
+          {toast.type === 'success' ? <CheckCircle className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+          {toast.message}
+          <button onClick={() => setToast(null)} className="ml-2 opacity-70 hover:opacity-100">
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -275,6 +405,21 @@ function formatDate(iso: string): string {
     const d = new Date(iso);
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
       ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  } catch {
+    return iso;
+  }
+}
+
+function formatTimeAgo(iso: string): string {
+  try {
+    const diff = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+    const days = Math.floor(hours / 24);
+    return `${days} day${days === 1 ? '' : 's'} ago`;
   } catch {
     return iso;
   }
