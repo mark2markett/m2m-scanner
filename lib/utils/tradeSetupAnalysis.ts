@@ -1,11 +1,10 @@
-import type { TechnicalIndicators as TI, M2MScorecard, M2MScoreFactor, NewsItem, OptionsData } from '@/lib/types';
-import { analyzeSentiment } from '@/lib/utils/sentimentAnalysis';
+import type { TechnicalIndicators as TI, M2MScorecard, M2MScoreFactor } from '@/lib/types';
 
-export type SetupStage = 'Setup Forming' | 'Just Triggered' | 'Mid Setup' | 'Late Setup';
+export type SetupStage = 'Setup Forming' | 'Just Triggered' | 'Mid Setup' | 'Late Setup' | 'No Setup';
 
 const PUBLICATION_THRESHOLD = 65;
 const REQUIRED_FACTORS_PASSED = 3;
-const TOTAL_FACTORS = 5;
+const TOTAL_FACTORS = 4;
 
 export class TradeSetupAnalyzer {
   static analyzeSetupStage(
@@ -13,7 +12,8 @@ export class TradeSetupAnalyzer {
     currentPrice: number,
     support: number[],
     resistance: number[],
-    recentPrices: number[]
+    recentPrices: number[],
+    volumes: number[]
   ): SetupStage {
     const { rsi, macd, ema20, ema50, bollingerBands } = indicators;
 
@@ -25,25 +25,51 @@ export class TradeSetupAnalyzer {
     const emaBullish = ema20 > ema50;
     const rsiBullish = rsi > 50 && rsi < 80;
 
+    // Volume confirmation: recent 5-bar avg >= 80% of 20-bar avg
+    const hasVolumeConfirmation = this.checkVolumeConfirmation(volumes);
+
+    // Moving average alignment: price and EMAs stacked in same direction
+    const maAligned = (currentPrice > ema20 && ema20 > ema50) || (currentPrice < ema20 && ema20 < ema50);
+
     const macdMagnitude = Math.abs(macd.macd);
     const histogramRatio = macdMagnitude > 0 ? Math.abs(macd.histogram) / macdMagnitude : 0;
     const recentMacdCross = histogramRatio < 0.15;
 
-    if (recentBreakout && recentMacdCross) {
+    // Late Setup: extreme RSI indicates exhaustion — classify first to avoid false triggers
+    if (rsi > 80 || rsi < 20) {
+      return 'Late Setup';
+    }
+
+    // Just Triggered: requires breakout + MACD cross + volume confirmation
+    if (recentBreakout && recentMacdCross && hasVolumeConfirmation) {
       return 'Just Triggered';
-    } else if (rsiBullish && emaBullish && macdBullish && !nearResistance) {
-      if (rsi > 75 || (currentPrice > bollingerBands.upper)) {
+    }
+
+    // Mid Setup: all signals aligned + MA stacked + not near resistance + volume
+    if (rsiBullish && emaBullish && macdBullish && !nearResistance && maAligned) {
+      if (currentPrice > bollingerBands.upper || rsi > 75) {
         return 'Late Setup';
-      } else {
+      }
+      if (hasVolumeConfirmation) {
         return 'Mid Setup';
       }
-    } else if ((nearSupport || nearResistance) && !recentBreakout) {
-      return 'Setup Forming';
-    } else if (rsi > 80 || rsi < 20) {
-      return 'Late Setup';
-    } else {
+    }
+
+    // Setup Forming: near key S/R level + MA alignment + not a breakout
+    if ((nearSupport || nearResistance) && maAligned && !recentBreakout) {
       return 'Setup Forming';
     }
+
+    // No Setup: conditions not met — no catch-all inflation
+    return 'No Setup';
+  }
+
+  private static checkVolumeConfirmation(volumes: number[]): boolean {
+    if (volumes.length < 20) return false;
+    const recent5 = volumes.slice(-5);
+    const avg5 = recent5.reduce((a, b) => a + b, 0) / recent5.length;
+    const avg20 = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
+    return avg20 > 0 && (avg5 / avg20) >= 0.8;
   }
 
   private static checkRecentBreakout(recentPrices: number[], resistance: number[], support: number[]): boolean {
@@ -64,30 +90,27 @@ export class TradeSetupAnalyzer {
   }
 
   /**
-   * M2M 5-Factor Scoring System
+   * M2M 4-Factor Scoring System (100pts total)
    *
    * 1. Strategy Signal Strength (30 pts)
    * 2. Technical Structure (25 pts)
-   * 3. Options Quality (25 pts)
-   * 4. Risk/Reward Ratio (10 pts)
-   * 5. Catalyst Presence (10 pts)
+   * 3. Short Interest Alignment (25 pts) — flow-based proxy using CMF + volume
+   * 4. Risk/Reward Ratio (20 pts)
    */
   static calculateM2MScorecard(
     indicators: TI,
     setupStage: SetupStage,
     volatilityRegime: 'High' | 'Normal' | 'Low',
-    newsData: NewsItem[],
     currentPrice: number,
     support: number[],
     resistance: number[],
-    optionsData?: OptionsData | null
+    volumes: number[]
   ): M2MScorecard {
     const factors: M2MScoreFactor[] = [
       this.scoreStrategySignalStrength(indicators),
       this.scoreTechnicalStructure(indicators, setupStage, currentPrice),
-      this.scoreOptionsQuality(optionsData || null, indicators.atr, currentPrice),
+      this.scoreShortInterestAlignment(indicators, currentPrice, volumes),
       this.scoreRiskReward(indicators, currentPrice, support, resistance),
-      this.scoreCatalystPresence(newsData),
     ];
 
     const totalScore = factors.reduce((sum, f) => sum + f.score, 0);
@@ -187,6 +210,7 @@ export class TradeSetupAnalyzer {
       case 'Mid Setup': score += 7; reasons.push('Mid-setup progression'); break;
       case 'Setup Forming': score += 4; reasons.push('Setup still forming'); break;
       case 'Late Setup': score += 1; reasons.push('Late-stage setup — extended'); break;
+      case 'No Setup': score += 0; reasons.push('No actionable setup detected'); break;
     }
 
     const { k } = indicators.stochastic;
@@ -201,50 +225,85 @@ export class TradeSetupAnalyzer {
     return { name: 'Technical Structure', maxPoints, score, passed, rationale: reasons.join('; ') };
   }
 
-  private static scoreOptionsQuality(optionsData: OptionsData | null, atr: number, currentPrice: number): M2MScoreFactor {
+  /**
+   * Short Interest Alignment (25pts)
+   * Uses CMF + volume trends as a flow-based proxy for institutional positioning.
+   * No Ortex/short interest data source available — CMF measures accumulation/distribution
+   * and volume trends confirm institutional conviction.
+   */
+  private static scoreShortInterestAlignment(
+    indicators: TI,
+    currentPrice: number,
+    volumes: number[]
+  ): M2MScoreFactor {
     const maxPoints = 25;
-
-    if (!optionsData) {
-      return {
-        name: 'Options Quality',
-        maxPoints,
-        score: 13,
-        passed: true,
-        rationale: 'Options data unavailable — neutral score applied.',
-      };
-    }
-
     let score = 0;
     const reasons: string[] = [];
 
-    const totalVolume = optionsData.totalCallVolume + optionsData.totalPutVolume;
-    const totalOI = optionsData.totalCallOI + optionsData.totalPutOI;
-    if (totalVolume > 10000 && totalOI > 50000) { score += 10; reasons.push('Excellent options liquidity'); }
-    else if (totalVolume > 5000 && totalOI > 20000) { score += 7; reasons.push('Good options liquidity'); }
-    else if (totalVolume > 1000 && totalOI > 5000) { score += 4; reasons.push('Moderate options liquidity'); }
-    else { score += 1; reasons.push('Low options liquidity'); }
+    // 1. CMF direction & magnitude (up to 10pts)
+    const cmf = indicators.cmf;
+    if (cmf > 0.15) {
+      score += 10;
+      reasons.push(`Strong accumulation (CMF: ${cmf.toFixed(2)})`);
+    } else if (cmf > 0.05) {
+      score += 7;
+      reasons.push(`Moderate accumulation (CMF: ${cmf.toFixed(2)})`);
+    } else if (cmf > -0.05) {
+      score += 4;
+      reasons.push(`Neutral flow (CMF: ${cmf.toFixed(2)})`);
+    } else if (cmf > -0.15) {
+      score += 2;
+      reasons.push(`Moderate distribution (CMF: ${cmf.toFixed(2)})`);
+    } else {
+      reasons.push(`Heavy distribution (CMF: ${cmf.toFixed(2)})`);
+    }
 
-    const pcr = optionsData.putCallRatio;
-    if (pcr < 0.7) { score += 8; reasons.push(`Bullish P/C ratio: ${pcr.toFixed(2)}`); }
-    else if (pcr <= 1.0) { score += 5; reasons.push(`Neutral P/C ratio: ${pcr.toFixed(2)}`); }
-    else { score += 2; reasons.push(`Bearish P/C ratio: ${pcr.toFixed(2)}`); }
+    // 2. Volume trend (up to 8pts) — compare last 5 bars avg to 20-bar avg
+    if (volumes.length >= 20) {
+      const recent5 = volumes.slice(-5);
+      const avg5 = recent5.reduce((a, b) => a + b, 0) / recent5.length;
+      const avg20 = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
+      const volumeRatio = avg20 > 0 ? avg5 / avg20 : 1;
 
-    const realizedVol = (atr / currentPrice) * Math.sqrt(252) * 100;
-    const avgIV = optionsData.avgImpliedVolatility * 100;
-    const ivRatio = avgIV > 0 ? realizedVol / avgIV : 1;
+      if (volumeRatio > 1.5) {
+        score += 8;
+        reasons.push('Volume surge — strong institutional interest');
+      } else if (volumeRatio > 1.1) {
+        score += 5;
+        reasons.push('Above-average volume — accumulation signal');
+      } else if (volumeRatio > 0.8) {
+        score += 3;
+        reasons.push('Normal volume activity');
+      } else {
+        score += 1;
+        reasons.push('Below-average volume — low conviction');
+      }
+    } else {
+      score += 3;
+      reasons.push('Insufficient volume history');
+    }
 
-    if (ivRatio > 0.8 && ivRatio < 1.2) { score += 7; reasons.push('IV fairly priced vs realized vol'); }
-    else if (ivRatio >= 1.2) { score += 5; reasons.push('IV below realized vol — options cheap'); }
-    else { score += 3; reasons.push('IV elevated vs realized vol — options expensive'); }
+    // 3. Flow-price alignment (up to 7pts)
+    const priceAboveEma = currentPrice > indicators.ema20;
+    const cmfPositive = cmf > 0;
+    const aligned = (priceAboveEma && cmfPositive) || (!priceAboveEma && !cmfPositive);
+
+    if (aligned) {
+      score += 7;
+      reasons.push('Flow direction confirms price trend');
+    } else {
+      score += 2;
+      reasons.push('Flow diverges from price trend — caution');
+    }
 
     score = Math.min(score, maxPoints);
     const passed = score >= maxPoints * 0.5;
 
-    return { name: 'Options Quality', maxPoints, score, passed, rationale: reasons.join('; ') };
+    return { name: 'Short Interest Alignment', maxPoints, score, passed, rationale: reasons.join('; ') };
   }
 
   private static scoreRiskReward(indicators: TI, currentPrice: number, support: number[], resistance: number[]): M2MScoreFactor {
-    const maxPoints = 10;
+    const maxPoints = 20;
     let score = 0;
     const reasons: string[] = [];
 
@@ -258,42 +317,14 @@ export class TradeSetupAnalyzer {
     const reward = Math.abs(nearestResistance - currentPrice);
     const rrRatio = risk > 0 ? reward / risk : 0;
 
-    if (rrRatio >= 3) { score += 10; reasons.push(`Excellent R/R ratio: ${rrRatio.toFixed(1)}:1`); }
-    else if (rrRatio >= 2) { score += 7; reasons.push(`Good R/R ratio: ${rrRatio.toFixed(1)}:1`); }
-    else if (rrRatio >= 1.5) { score += 5; reasons.push(`Acceptable R/R ratio: ${rrRatio.toFixed(1)}:1`); }
-    else if (rrRatio >= 1) { score += 3; reasons.push(`Marginal R/R ratio: ${rrRatio.toFixed(1)}:1`); }
+    if (rrRatio >= 3) { score += 20; reasons.push(`Excellent R/R ratio: ${rrRatio.toFixed(1)}:1`); }
+    else if (rrRatio >= 2) { score += 15; reasons.push(`Good R/R ratio: ${rrRatio.toFixed(1)}:1`); }
+    else if (rrRatio >= 1.5) { score += 10; reasons.push(`Acceptable R/R ratio: ${rrRatio.toFixed(1)}:1`); }
+    else if (rrRatio >= 1) { score += 5; reasons.push(`Marginal R/R ratio: ${rrRatio.toFixed(1)}:1`); }
     else { reasons.push(`Poor R/R ratio: ${rrRatio.toFixed(1)}:1`); }
 
     const passed = score >= maxPoints * 0.5;
 
     return { name: 'Risk/Reward Ratio', maxPoints, score, passed, rationale: reasons.join('; ') };
-  }
-
-  private static scoreCatalystPresence(newsData: NewsItem[]): M2MScoreFactor {
-    const maxPoints = 10;
-    let score = 0;
-    const reasons: string[] = [];
-
-    if (newsData.length === 0) {
-      score = 3;
-      reasons.push('No recent news — neutral catalyst environment');
-    } else {
-      const sentiment = analyzeSentiment(newsData);
-
-      if (sentiment === 'Positive') {
-        score = 10;
-        reasons.push('Positive news sentiment provides catalyst support');
-      } else if (sentiment === 'Neutral') {
-        score = 5;
-        reasons.push('Neutral news sentiment — no catalyst headwind or tailwind');
-      } else {
-        score = 1;
-        reasons.push('Negative news sentiment presents catalyst headwind');
-      }
-    }
-
-    const passed = score >= maxPoints * 0.5;
-
-    return { name: 'Catalyst Presence', maxPoints, score, passed, rationale: reasons.join('; ') };
   }
 }

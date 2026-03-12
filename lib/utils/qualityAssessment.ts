@@ -1,4 +1,4 @@
-import type { M2MScorecard, TechnicalIndicators } from '@/lib/types';
+import type { M2MScorecard, TechnicalIndicators, NewsItem } from '@/lib/types';
 
 export interface QualityAssessment {
   setupQuality: 'high' | 'moderate' | 'low';
@@ -7,31 +7,10 @@ export interface QualityAssessment {
   catalystPresent: boolean;
 }
 
-/**
- * Adjusted scoring that removes the options factor inflation when options data is missing.
- */
-export function getAdjustedScoring(scorecard: M2MScorecard, hasOptionsData: boolean) {
-  if (hasOptionsData) {
-    const pct = scorecard.maxScore > 0 ? (scorecard.totalScore / scorecard.maxScore) * 100 : 0;
-    return {
-      adjustedScore: scorecard.totalScore,
-      adjustedMax: scorecard.maxScore,
-      adjustedPct: pct,
-      realFactorsPassed: scorecard.factorsPassed,
-    };
-  }
+function computeSetupQuality(scorecard: M2MScorecard): 'high' | 'moderate' | 'low' {
+  const pct = scorecard.maxScore > 0 ? (scorecard.totalScore / scorecard.maxScore) * 100 : 0;
 
-  const optionsFactor = scorecard.factors[2]; // Factor 3: Options Quality
-  const adjustedScore = scorecard.totalScore - optionsFactor.score;
-  const adjustedMax = scorecard.maxScore - optionsFactor.maxPoints;
-  const adjustedPct = adjustedMax > 0 ? (adjustedScore / adjustedMax) * 100 : 0;
-  const realFactorsPassed = scorecard.factorsPassed - (optionsFactor.passed ? 1 : 0);
-  return { adjustedScore, adjustedMax, adjustedPct, realFactorsPassed };
-}
-
-function computeSetupQuality(scorecard: M2MScorecard, hasOptionsData: boolean): 'high' | 'moderate' | 'low' {
-  const { adjustedPct, realFactorsPassed } = getAdjustedScoring(scorecard, hasOptionsData);
-
+  // Factor indices: [0]=Strategy Signal, [1]=Technical Structure, [2]=Short Interest Alignment, [3]=Risk/Reward
   const signalStrengthPasses = scorecard.factors[0].passed;
   const techStructurePasses = scorecard.factors[1].passed;
   const riskRewardPasses = scorecard.factors[3].passed;
@@ -40,20 +19,20 @@ function computeSetupQuality(scorecard: M2MScorecard, hasOptionsData: boolean): 
     signalStrengthPasses &&
     techStructurePasses &&
     riskRewardPasses &&
-    adjustedPct >= 70 &&
-    realFactorsPassed >= 3
+    pct >= 70 &&
+    scorecard.factorsPassed >= 3
   ) {
     return 'high';
   }
 
-  if (adjustedPct >= 45 && realFactorsPassed >= 2) {
+  if (pct >= 45 && scorecard.factorsPassed >= 2) {
     return 'moderate';
   }
 
   return 'low';
 }
 
-function computeConfidence(scorecard: M2MScorecard, indicators: TechnicalIndicators, hasOptionsData: boolean): number {
+function computeConfidence(scorecard: M2MScorecard, indicators: TechnicalIndicators): number {
   const signals = [
     indicators.ema20 > indicators.ema50,
     indicators.macd.macd > indicators.macd.signal,
@@ -74,17 +53,14 @@ function computeConfidence(scorecard: M2MScorecard, indicators: TechnicalIndicat
   const stochHealthy = indicators.stochastic.k > 20 && indicators.stochastic.k < 80;
   const momentumScore = (histConfirms ? 40 : 0) + (rsiHealthy ? 30 : 0) + (stochHealthy ? 30 : 0);
 
-  const { adjustedPct } = getAdjustedScoring(scorecard, hasOptionsData);
-  const convictionScore = (Math.abs(adjustedPct - 50) / 50) * 100;
-
-  const completenessScore = hasOptionsData ? 100 : 80;
+  const pct = scorecard.maxScore > 0 ? (scorecard.totalScore / scorecard.maxScore) * 100 : 50;
+  const convictionScore = (Math.abs(pct - 50) / 50) * 100;
 
   return Math.round(
-    consensusScore * 0.30 +
+    consensusScore * 0.35 +
     adxScore * 0.25 +
-    momentumScore * 0.20 +
-    convictionScore * 0.15 +
-    completenessScore * 0.10
+    momentumScore * 0.25 +
+    convictionScore * 0.15
   );
 }
 
@@ -95,12 +71,12 @@ export function assessQuality(
   scorecard: M2MScorecard,
   indicators: TechnicalIndicators,
   setupStage: string,
-  hasOptionsData: boolean
+  newsData: NewsItem[]
 ): QualityAssessment {
   return {
-    setupQuality: computeSetupQuality(scorecard, hasOptionsData),
-    signalConfidence: computeConfidence(scorecard, indicators, hasOptionsData),
+    setupQuality: computeSetupQuality(scorecard),
+    signalConfidence: computeConfidence(scorecard, indicators),
     earlyStage: setupStage === 'Setup Forming' || setupStage === 'Just Triggered',
-    catalystPresent: scorecard.factors[4].passed,
+    catalystPresent: newsData.some(n => n.sentiment === 'Positive'),
   };
 }

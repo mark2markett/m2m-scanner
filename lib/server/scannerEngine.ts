@@ -31,17 +31,16 @@ async function analyzeStock(stock: SP500Stock): Promise<ScannerStockResult> {
   const pivots = SupportResistanceAnalyzer.findPivotPoints(highs, lows, closes);
   const { support, resistance } = SupportResistanceAnalyzer.getKeyLevels(pivots, stockData.price);
 
-  const setupStage = TradeSetupAnalyzer.analyzeSetupStage(indicators, stockData.price, support, resistance, closes);
+  const setupStage = TradeSetupAnalyzer.analyzeSetupStage(indicators, stockData.price, support, resistance, closes, volumes);
 
   const scorecard = TradeSetupAnalyzer.calculateM2MScorecard(
     indicators,
     setupStage,
     indicatorResults.regime as 'High' | 'Normal' | 'Low',
-    newsData,
     stockData.price,
     support,
     resistance,
-    null // skip options data for scanner
+    volumes
   );
 
   const macdSignal: 'bullish' | 'bearish' = indicators.macd.macd > indicators.macd.signal ? 'bullish' : 'bearish';
@@ -56,7 +55,7 @@ async function analyzeStock(stock: SP500Stock): Promise<ScannerStockResult> {
     : 'No significant news';
 
   // Algorithmic scoring — deterministic, transparent, consistent across runs
-  const quality = assessQuality(scorecard, indicators, setupStage, false);
+  const quality = assessQuality(scorecard, indicators, setupStage, newsData);
   const aiSetupQuality = quality.setupQuality;
   const aiConfidence = quality.signalConfidence;
   const aiEarlyStage = quality.earlyStage;

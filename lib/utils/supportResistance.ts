@@ -122,7 +122,7 @@ export class SupportResistanceAnalyzer {
     const clusteredResistance = this.clusterLevels(resistancePrices, 0.015);
 
     const supportLevels = clusteredSupport
-      .sort((a, b) => Math.abs(b - currentPrice) - Math.abs(a - currentPrice))
+      .sort((a, b) => Math.abs(a - currentPrice) - Math.abs(b - currentPrice))
       .slice(0, 3);
 
     const resistanceLevels = clusteredResistance
